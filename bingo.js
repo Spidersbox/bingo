@@ -3,12 +3,24 @@ const Discord = require('discord.js');
 const mysql = require('mysql');
 const config=require("./config.json");
 const pool = require('./database');
-//const coins = require("./coins.json");
+const pricepool = require('./pricedb');
+const watchdog = require('./watchdogdb');
+const https = require("https");
 var rpc = require('node-json-rpc');
 
 // Create an instance of Discord that we will use to control the bot
 const bot = new Discord.Client();
-
+//const bot = new Discord.Client({
+//	  intents: [
+//		      GatewayIntentBits.DirectMessages,
+//		      GatewayIntentBits.Guilds,
+//		      GatewayIntentBits.GuildBans,
+//		      GatewayIntentBits.GuildMessages,
+//		      GatewayIntentBits.MessageContent,
+//		    ],
+//	  partials: [Partials.Channel],
+//});
+//
 const token = config.token;
 
 const sqluser=config.sqluser;
@@ -16,17 +28,37 @@ const sqlpass=config.sqlpass;
 const sqldatabase=config.sqldatabase;
 const prefix = config.prefix;
 var server=config.server;
-const roomid=config.roomid;
 const ticker=config.ticker;
+const firstchar=config.firstchar;
+const firstchar2=config.firstchar2;
 const logo=config.logo;
 const gamecost=config.gamecost;
+const housecost=config.housecost;
+
+//  rooms
+const bingoroom=config.bingoroom;
+const gameroom=config.gameroom;
+const contestroom=config.contestroom;
+const faucetroom=config.faucetroom;
+const botroom=config.botroom;
+const bottest=config.bottest;
+const ticketroom=config.ticketroom;
+
+const rain_enabled=config.rain_enabled;
+const fountain_enabled=config.fountain_enabled;
+const bingo_enabled=config.bingo_enabled;
+
+const fountainid=config.fountainid;
 var coinsarray=[];
 coinsarray.push(ticker);
+
+// cut date 30 days, in minutes
+const cutage= 30 *24 *60;
 
 //var user="";
 var done=0;
 var text="";
-var gamebalance=0;
+//var gamebalance=0;
 var ret;
 var authorid="";
 var counter=0;
@@ -52,8 +84,9 @@ bot.on('message', message =>
 var type=message.channel.type;
 
 console.log("message type=",type);
+
   user=message.author.username;
-  authorid=message.author.discriminator;
+  userid=message.author.id;
   if(message.channel.type=="dm")
     server="dm";
   else
@@ -67,12 +100,16 @@ console.log("message type=",type);
 //console.log("Server name:"+server);
 //console.log("Guild id:"+guildid);
 //console.log("channel id:"+channelid);
-
+//console.log("user:",user);
+//console.log("message ",message);
+//console.log("message.content ",message.content);
+	
   done=0;
 
 //  const args = message.content.trim().split(/ +/g);
   const args = message.content.trim().split(/ /);
   var command = args[0].toLowerCase();
+//console.log("command",command);
 
   if (!message.content.startsWith(prefix))
   {
@@ -86,10 +123,54 @@ console.log("message type=",type);
         message.channel.send('bar.');
         done=1;
         break;
-      case "help":
-        getHelp(message);
+      case "marco" :
+        message.channel.send('polo.');
         done=1;
         break;
+
+    }
+
+    if((channelid==faucetroom) || (channelid==bottest)||(channelid==botroom)||(channelid==bingoroom))
+    {
+      switch (command)
+      {
+        case "help":
+          getMainHelp(message);
+          done=1;
+          break;
+      }
+    }
+
+    if((channelid==faucetroom) || (channelid==bottest))
+    {
+      switch (command)
+      {
+        case "thank" :
+          text="you are welcome.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "thanks" :
+          text="yep, np";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "grazie" :
+          text="prego!";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "thx" :
+          text="np";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "danke" :
+          text="bitte";
+          message.channel.send(text);
+          done=1;
+          break;
+      }
     }
   }
   else
@@ -99,7 +180,47 @@ console.log("message type=",type);
     {
       done=1;
     }
-
+    if((channelid!=bottest) && (channelid!=botroom) && (channelid!=faucetroom) && (channelid!=contestroom) && (channelid!=gameroom) && (channelid!=bingoroom))
+    {
+      switch (command)
+      {
+        case "help":
+          getMainHelp(message);
+          done=1;
+          break;
+        case "playnow" :
+        case "buycard":
+        case "bingo":
+        case "play":
+        case "stats":
+        case "status":
+        case "house":
+          text="in the bingo room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "fountain":
+        case "faucet":
+        case "rain":
+          text="in the lets-get-wet room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "donate": // empty to skip 'sorry, you were mumbling' message
+        case "donation":
+        case "donations":
+        case "wallet":
+        case "peers":
+        case "price":
+        case "withdraw":
+        case "withdrawal":
+        case "send":
+          text="in the bot-commands room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+      }
+    }
     if(server=="dm")
     {
       switch (command)
@@ -118,7 +239,7 @@ console.log("message type=",type);
           done=1;
           break;
         case "help":
-          getHelp(message);
+          getMainHelp(message);
           done=1;
           break;
         case "donate":
@@ -130,10 +251,30 @@ console.log("message type=",type);
       }
     }
     else
-    if((channelid==roomid) || (channelid=="497999755574640677"))
+    if(channelid==bingoroom) //--------------------------------- command for bingo room
     {
       switch (command)
       {
+        case "fountain":
+        case "faucet":
+        case "rain":
+          text="in the lets-get-wet room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "donate": // empty to skip 'sorry, you were mumbling' message
+        case "donation":
+        case "donations":
+        case "wallet":
+        case "peers":
+        case "price":
+        case "withdraw":
+        case "withdrawal":
+        case "send":
+          text="in the bot-commands room please.";
+          message.channel.send(text);
+          done=1;
+          break;
         case "playnow" :
           play(message);
           done=1;
@@ -142,6 +283,209 @@ console.log("message type=",type);
         case "bingo":
         case "play":
           issueCard(message);
+          done=1;
+          break;
+        case "balance":
+        case "bal":
+          getBalance(message);
+          done=1;
+          break;
+        case "help":
+          getBingoroomHelp(message);
+          done=1;
+          break;
+        case "house":
+          getHouse(message);
+          done=1;
+          break;
+        case "deposit":
+        case "dep":
+          deposit(message);
+          done=1;
+          break;
+        case "tip":
+          sendTip(message);
+          done=1;
+          break;
+        case "stats":
+        case "status":
+          readUser(message,userid);
+          done=1;
+        break;
+        case "*":
+          done=1;
+          break;
+        default:
+          text="sorry, you were mumbling ...";
+          message.channel.send(text);
+          done=1;
+      }
+    }
+    else
+    if(channelid==gameroom) //--------------------------------- command for game room
+    {
+      switch (command)
+      {
+        case "donate": // empty to skip 'sorry, you were mumbling' message
+        case "donation":
+        case "donations":
+        case "price":
+        case "peers":
+        case "wallet":
+          text="in the bot-commands room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "playnow" :
+        case "buycard":
+        case "bingo":
+        case "play":
+        case "stats":
+        case "status":
+        case "house":
+          text="in the bingo room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "fountain":
+        case "faucet":
+        case "rain":
+          text="in the lets-get-wet room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "balance":
+        case "bal":
+          getBalance(message);
+          done=1;
+          break;
+        case "help":
+          getGameroomHelp(message);
+          done=1;
+          break;
+        case "deposit":
+        case "dep":
+          deposit(message);
+          done=1;
+          break;
+        case "tip":
+          sendTip(message);
+          done=1;
+          break;
+        case "*":
+          done=1;
+          break;
+        default:
+          text="sorry, you were mumbling ...";
+          message.channel.send(text);
+          done=1;
+      }
+    }
+    else
+    if((channelid==faucetroom) || (channelid==bottest))
+    {
+      switch (command)
+      {
+        case "donate": // empty to skip 'sorry, you were mumbling' message
+        case "donation":
+        case "donations":
+        case "wallet":
+        case "peers":
+        case "withdraw":
+        case "withdrawal":
+        case "send":
+          text="in the bot-commands room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+
+        case "thank" :
+          text="you are welcome.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "thanks" :
+          text="yep, np";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "grazie" :
+          text="prego!";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "thx" :
+          text="np";
+          message.channel.send(text);
+          done=1;
+          break;
+
+        case "bingo":
+        case "play":
+        case "playnow" :
+          text="in the bingo room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "help":
+          getFaucetroomHelp(message);
+          done=1;
+          break;
+        case "deposit":
+        case "dep":
+          deposit(message);
+          done=1;
+          break;
+        case "balance":
+        case "bal":
+          getBalance(message);
+          done=1;
+          break;
+        case "tip":
+          sendTip(message);
+          done=1;
+          break;
+        case "fountain":
+        case "faucet":
+          sendDrip(message);
+          done=1;
+          break;
+        case "rain":
+          Rain(message);
+          done=1;
+          break;
+        case "bal":
+          done=1;
+          break;
+
+      }
+    }
+    if(channelid==contestroom)
+    {
+      done=1;
+      switch (command)
+      {
+        case "tip":
+          sendTip(message);
+          done=1;
+          break;
+
+      }
+    }
+    else
+    if(channelid==botroom)
+    {
+      switch (command)
+      {
+        case "bingo":
+        case "play":
+        case "playnow" :
+          text="in the bingo room please.";
+          message.channel.send(text);
+          done=1;
+          break;
+        case "price":
+          getPrices(message);
           done=1;
           break;
         case "foo" :
@@ -154,7 +498,7 @@ console.log("message type=",type);
           done=1;
           break;
         case "help":
-          getHelp(message);
+          getGameroomHelp(message);
           done=1;
           break;
         case "house":
@@ -178,7 +522,17 @@ console.log("message type=",type);
           break;
         case "wallet":
           walletStatus(message);
-        case "*":
+          done=1;
+          break;
+        case "peers":
+          peerList(message);
+          done=1;
+          break;
+        case "fountain":
+        case "faucet":
+        case "rain":
+          text="in the 'lets-get-wet' room please.";
+          message.channel.send(text);
           done=1;
           break;
         case "donate":
@@ -189,16 +543,18 @@ console.log("message type=",type);
           break;
         case "stats":
         case "status":
-          readUser(message,user+authorid);
+          readUser(message,userid);
           done=1;
-        break;
+          break;
+        case "*":
+          done=1;
+          break;
       }
     }
     if(! done)
     {
-      text="sorry, you were mumbling ...";
-      if(channelid!=roomid)
-        text="in the games-bingo room please."
+//      text=channelid+" sorry, you were mumbling ...";
+      text=" sorry, you were mumbling ...";
       message.channel.send(text);
     }
   }
@@ -210,11 +566,16 @@ bot.login(token);
 
 async function issueCard(message)
 {
-//bot.guilds.guildid.channels.channelid.send("playing");
-//  check to see if player has a card
+  if(!bingo_enabled)
+  {
+    BingoDisabled(message);
+    return;
+  }
+
   let user=message.author.username;
-  let authorid=message.author.discriminator;
-  var test=await gamecard(user);
+  let userid=message.author.id;
+  var test=await gamecard(user,userid);
+  var gamebalance=0;
   if(test)
   {
     message.reply("you already have a bingo card for "+ticker);
@@ -223,7 +584,16 @@ async function issueCard(message)
 //console.log("back from gamecard test=",test);
 
 //  check to see if player has enough coin
-  var test=await getGameBalance(user+authorid);
+  var test=await getGameBalance(userid);
+gamebalance=test;
+  if(gamebalance<0)
+  {
+    text="Sorry, could not find any address for you in my database.";
+    text=text+"\nyou need to make an address by using the command \\*dep";
+    text=text+"\n(*help for help)";
+    message.reply(text);
+  }
+
 console.log("getGameBal: test=%d gamebalance=%d",test,gamebalance);
   if(gamebalance < gamecost)
   {
@@ -231,8 +601,8 @@ console.log("getGameBal: test=%d gamebalance=%d",test,gamebalance);
     return;
   }
 
-  createUserTable(user+authorid);
-  gamebalance=await chargeUser(user+authorid);
+  createUserTable(userid);
+  gamebalance=await chargeUser(userid);
 console.log("from chargeUser() "+ticker+" gamebalance="+gamebalance);
 
 var B=['01','02','03','04','05','06','07','08','09','10','11','12','13','14','15'];
@@ -264,7 +634,7 @@ var O=['61','62','63','64','65','66','67','68','69','70','71','72','73','74','75
 
 
   text="\`\`\`cpp\n"+line0+"\n"+line1+"\n"+line2+"\n"+line3+"\n"+line4+"\n"+line5+"   \n\`\`\`";
-  const embed = new Discord.RichEmbed()
+  const embed = new Discord.MessageEmbed()
   .setTitle("Here is your card "+user)
   .setColor(0x97AE86)
   .setDescription(text)
@@ -276,7 +646,8 @@ var O=['61','62','63','64','65','66','67','68','69','70','71','72','73','74','75
   let n= JSON.stringify(N);
   let g= JSON.stringify(G);
   let o= JSON.stringify(O);
-  let res=await updateGame(user,authorid,ticker,b,i,n,g,o);
+//  let res=await updateGame(user,userid,ticker,b,i,n,g,o);
+  let res=await updateGame(userid,userid,ticker,b,i,n,g,o);
 
 //  let res2=await updateGame("Spiders Bingo","8267",ticker,b,i,n,g,o);
 //console.log(user+" updategame="+res);
@@ -299,8 +670,7 @@ async function nextCounter(message)
 }
 
 
-//////////////////////////////////////////////////////////////////////////////////ult = await pool.query("select * from house where ticker="+"\""+ticker+"\"");
-//console.log("readPot result=",result);
+////////////////////////////////////////////////////////////////////////////////
 async function play(message)
 {
 //  message.channel.send("playing");
@@ -308,6 +678,7 @@ async function play(message)
 //console.log("guildid'",guildid);
   counter=0;
   winners=[];
+  winnersid=[];
   tries=[];
   how=[];
 
@@ -315,9 +686,12 @@ async function play(message)
 
   //  players global
   players=await loadPlayers(ticker);
+//console.log("players=",players);
   var playersNum=players.length;
 //console.log("\nplayers  =",playersNum);
-//console.log(players[0].name+" players[0].B =%j",players[0].B);
+
+console.log(players[0].name+" players[0].B =%j",players[0].B);
+
   for(let t=0;t<playersNum;t++)
   {
     players[t].B=JSON.parse(players[t].B);
@@ -394,7 +768,9 @@ async function play(message)
 //console.log("numbers "+text);  
   }
   var diff=[];
+  var diffid=[];
   diff.push(winners[0]); //push the first one
+  diffid.push(winnersid[0]);
   tie=0;
   if(winners.length>1)
   {
@@ -405,7 +781,10 @@ async function play(message)
       let d=diff.indexOf(winners[t]);
 console.log("(indexof)%s %d=",winners[t],d);
       if(d==-1)
+      {
         diff.push(winners[t]);
+        diffid.push(winnersid[t]);
+      }
     }
     
     tie=diff.length-1;
@@ -415,7 +794,7 @@ console.log("(indexof)%s %d=",winners[t],d);
     }
   }
   var loosers=players;
-  var pot=10*playersNum;
+  var pot=gamecost*playersNum;
   var house=0;
   if(tie)
   {
@@ -430,9 +809,9 @@ console.log("diff.length=%d playerNum=%d",diff.length,playersNum);
     let amt=pot/tie;
     for(let t=0;t<diff.length;t++)
     {
-      let credituser=diff[t];
-      text=text+credituser+" gets "+amt+"\n";
-      let res=await creditUser("bingo",10,"tie",ticker,credituser,amt);
+      let credituser=diffid[t];
+      text=text+diff[t]+" gets "+amt+"\n";
+      let res=await creditUser("bingo",gamecost,"tie",ticker,credituser,amt);
     }
     text=text+"```";
   }
@@ -441,7 +820,7 @@ console.log("diff.length=%d playerNum=%d",diff.length,playersNum);
     pot=pot-1;  // 1 for the house
     house++;
     text="```"+diff+" won "+pot+" "+ticker+" in "+tries+" rounds,\nwith "+how+"```";
-    let res=await creditUser("bingo",10,"win",ticker,diff[0],pot);
+    let res=await creditUser("bingo",gamecost,"win",ticker,diffid,pot);
   }
   if(house>0)
   {
@@ -467,7 +846,7 @@ console.log("tries=",tries);
 text="";
   for(let t=0;t<loosers.length;t++)
   {
-    await creditUser("bingo",10,"lose",ticker,loosers[t].name,0);
+    await creditUser("bingo",gamecost,"lose",ticker,loosers[t].userid,0);
   }
 
   let res=await pool.query("delete from bingo where ticker=\""+ticker+"\"");
@@ -478,7 +857,7 @@ async function showCards(message,ticker,user,text)
 {
 //  message.channel.send("playing");
 //console.log("showCards called.");
-  const embed = new Discord.RichEmbed()
+  const embed = new Discord.MessageEmbed()
   .setTitle("Your card "+user)
   .setColor(0x97AE86)
   .setDescription(text)
@@ -530,6 +909,7 @@ let bingo=0;
       {
         endgame=1;
         winners.push(players[i].name);
+        winnersid.push(players[i].userid);
 console.log(players[i].name+" winner!!");
       }
 
@@ -538,6 +918,7 @@ console.log(players[i].name+" winner!!");
       {
         endgame=1;
         winners.push(players[i].name);
+        winnersid.push(players[i].userid);
 console.log(players[i].name+" winner!!");
       }
 
@@ -546,6 +927,7 @@ console.log(players[i].name+" winner!!");
       {
         endgame=1;
         winners.push(players[i].name);
+        winnersid.push(players[i].userid);
 console.log(players[i].name+" winner!!");
       }
 
@@ -554,6 +936,7 @@ console.log(players[i].name+" winner!!");
       {
         endgame=1;
         winners.push(players[i].name);
+        winnersid.push(players[i].userid);
 console.log(players[i].name+" winner!!");
       }
 
@@ -838,24 +1221,36 @@ async function checkCol(players,hits)
 ///////////////////////////////////////////// loadPlayers
 async function loadPlayers(ticker)
 {
+  var user="";
   let res=await pool.query("SELECT * FROM bingo where ticker=\""+ticker+"\"");
+
+  var rec=res.length;
+  for(let t=0;t<rec;t++)
+  {
+    user=await bot.users.fetch(res[t].name);
+//    res[t].name=bot.users.get(res[t].name).username;
+    res[t].name=user.username;
+  }
+
   return(res);
 }
 
 ///////////////////////////////////////////// gamecard
-async function gamecard(user)
+async function gamecard(user,userid)
 {
-//console.log("user %s ticker %s",user,ticker);
-  let res=await pool.query("SELECT * FROM bingo where name=\""+user+"\" and ticker=\""+ticker+"\"");
+  let res=await pool.query("SELECT * FROM bingo where ticker=\""+ticker+"\" and userid=\""+userid+"\"");
 //  console.log("gamecard returned %j",res);
   return(res.length);
 }
 
-async function updateGame(user,authorid,ticker,b,i,n,g,o)
+async function updateGame(user,userid,ticker,b,i,n,g,o)
 {
+//  note:  user is not used because of unicode emoji's in names
+//         use userid for tables
+
   try
   {
-    let result = await pool.query('insert into bingo (name,authorid,ticker,B,I,N,G,O,hits) VALUES (\''+ user+'\',\''+authorid+'\',\''+ticker+'\',\''+b+'\',\''+i+'\',\''+n+'\',\''+g+'\',\''+o+'\',\'0\')');
+    let result = await pool.query('insert into bingo (name,userid,ticker,B,I,N,G,O,hits) VALUES (\''+ userid+'\',\''+userid+'\',\''+ticker+'\',\''+b+'\',\''+i+'\',\''+n+'\',\''+g+'\',\''+o+'\',\'0\')');
 //console.log("insert result=",result);
     return(result);
   }
@@ -877,11 +1272,142 @@ function shuffleArray(array)
   array.sort(function(a, b){return a - b;});
 }
 
-function getHelp(message)
+
+//******************************************* GameroomHelp
+function getGameroomHelp(message)
 {
   var sendmess=0;
   var text="";
   var title="";
+
+  if(sendmess==0)
+  {
+    title="Spider's Game Room **HELP** - "+server;
+    text="prefix *\n";
+    text=text+"\n";
+    text=text+"  *bal\n";
+    text=text+"  *balance    -  your current "+ticker+" balance.\n";
+    text=text+"\n";
+    text=text+"  *dep\n";
+    text=text+"  *deposit    -  to put create a "+ticker+" address.\n";
+    text=text+"\n";
+    text=text+"  *send\n";
+    text=text+"  *withdraw\n";
+    text=text+"  *withdrawal -  to tranfer coins out of your account.\n";
+    text=text+"\n";
+    text=text+"  *tip        -  tip a user with coins out of your account.\n";
+    text=text+"\n";
+
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo);
+    message.channel.send({embed});
+//    message.reply({embed});
+  }
+}
+
+//******************************************* BingoroomHelp
+function getBingoroomHelp(message)
+{
+  var sendmess=0;
+  var text="";
+  var title="";
+
+  if(sendmess==0)
+  {
+    title="Spider's Bingo Room **HELP** - "+server;
+    text="prefix *\n";
+    text=text+"\n";
+    text=text+"  *play\n";
+    text=text+"  *bingo\n";
+    text=text+"  *buycard  -  to buy a bingo card for "+gamecost+" "+ticker+"\n";
+    text=text+"\n";
+    text=text+"  *dep\n";
+    text=text+"  *deposit  -  to create a Discord "+ticker+" address.\n";
+    text=text+"\n";
+    text=text+"  *tip      -  tip a user with coins out of your account.\n";
+    text=text+"\n";
+    text=text+"  *stats\n";
+    text=text+"  *status   -  to check your win/loss status.\n";
+    text=text+"\n";
+    text=text+"  *bal\n";
+    text=text+"  *balance  -  to see your "+ticker+" balance\n";
+    text=text+"\n";
+
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo);
+    message.channel.send({embed});
+//    message.reply({embed});
+  }
+}
+
+//******************************************* FaucetroomHelp
+function getFaucetroomHelp(message)
+{
+  var sendmess=0;
+  var text="";
+  var title="";
+
+  if(sendmess==0)
+  {
+    title="Spider's Fountain Room **HELP** - "+server;
+    text="prefix *\n";
+    text=text+"\n";
+    text=text+"  *deposit\n";
+    text=text+"  *dep      -  to create a "+ticker+" address.\n";
+    text=text+"\n";
+    text=text+"  *tip      -  tip a user with coins out of your account.\n";
+    text=text+"               (*tip #Faucet 50).\n";
+    text=text+"\n";
+    text=text+"  *bal\n";
+    text=text+"  *balance  -  to see your "+ticker+" balance\n";
+    text=text+"\n";
+    text=text+"  *fountain\n";
+    text=text+"  *faucet   -  to receive 0.1 "+ticker+" - you can claim once an hour.\n";
+    text=text+"\n";
+    text=text+"  *rain     -  uses your "+ticker+" to create rain for other users.\n";
+    text=text+"\n";
+    text=text+"\n";
+    text=text+"Please note that you have to have a "+ticker+" Discord address to receive.\n";
+    text=text+"\n";
+
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo);
+    message.channel.send({embed});
+//    message.reply({embed});
+  }
+}
+
+//***************************************** getMainHelp
+function getMainHelp(message)
+{
+  var sendmess=0;
+  var text="";
+  var title="";
+  channelid=message.channel.id;
 
   if(server=="dm")
   {
@@ -889,7 +1415,7 @@ function getHelp(message)
     text="  *balance  -  your current balance in the \'games\' wallet.\n";
     text=text+"  that is all for now in DM commands\n";
 
-    const embed = new Discord.RichEmbed()
+    const embed = new Discord.MessageEmbed()
     .setTitle(title)
     .setColor(0x97AE86)
     .setDescription(text)
@@ -898,57 +1424,63 @@ function getHelp(message)
     return;
   }
 
-  const args = message.content.trim().split(/ /);
-  if(args[1])
+  if(channelid !=ticketroom)
   {
-    arg1=args[1].toLowerCase();
-    if(arg1="wallet")
+    const args = message.content.trim().split(/ /);
+    if(args[1])
     {
-      title=" Wallet HELP  - "+server;
-      text=" nothing yet.";
-      sendmess=1;
+      arg1=args[1].toLowerCase();
+      if(arg1="wallet")
+      {
+        title=" Wallet HELP  - "+server;
+        text=" nothing yet.";
+        sendmess=1;
+      }
+      if(arg1="bingo")
+      {
+        title=" Bingo HELP  - "+server;
+        text=" still working on that.";
+        sendmess=1;
+      }
     }
-    if(arg1="bingo")
+
+    if(sendmess==0)
     {
-      title=" Bingo HELP  - "+server;
-      text=" still working on that.";
+      title="Spider's General **HELP** - "+server;
+      text="prefix *\n";
+      text=text+"Most commands and help have been moved to the different\n";
+      text=text+"sub-channels in the #GAMES category.\n\n";
+      text=text+"please use *help in those channels for more information.\n";
       sendmess=1;
     }
 
-  }
-  if(sendmess==0)
-  {
-    title="Spider's Bingo - **HELP** - "+server;
-    text="prefix *\n";
-    text=text+"  *bingo    -  to get a card and play (requires 10 "+ticker+")\n";
-    text=text+"  *balance  -  your current balance in the \'games\' wallet.\n";
-    text=text+"  *deposit  -  to put "+ticker+" in your account to play.\n";
-    text=text+"  *withdraw -  to tranfer coins out of your account.\n";
-    text=text+"  *tip      -  tip a user with coins out of your account.\n";
-    text=text+"  *stats    -  game stats like games won, lost ...\n";
-    sendmess=1;
-  }
-
-  if(sendmess==1)
-  {
-    const embed = new Discord.RichEmbed()
-    .setTitle(title)
-    .setColor(0x97AE86)
-    .setDescription(text)
-    .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo);
-    message.reply({embed});
+    if(sendmess==1)
+    {
+      const embed = new Discord.MessageEmbed()
+      .setTitle(title)
+      .setColor(0x97AE86)
+      .setDescription(text)
+      .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo);
+      message.channel.send({embed});
+//    message.reply({embed});
+    }
   }
 }
 
 async function sendTip(message,quiet)
 {
   const args = message.content.trim().split(/ /);
-  var user=message.author.username;
-  var authorid=message.author.discriminator;
+//  var user=message.author.username;
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
+  var userid=message.author.id;
   var text;
   var tipuser;
+  var tipuserid;
   var amount;
-  var tipcoin=ticker;
   var arg4;
   var bad=0;
   var errmsg="";
@@ -957,33 +1489,49 @@ async function sendTip(message,quiet)
     text="**  that user was not found.";
     tipuser=args[1].toLowerCase();
 
-    if((tipuser[0] =="<") && (tipuser[1] =="@"))
+console.log("tipuser=",tipuser);
+
+    if((tipuser[0] =="<") && (tipuser[1] =="@") && (tipuser[2]=="!"))
     { // found user id
-      id=tipuser.substring(2,tipuser.length-1);
-      tipuser=bot.users.get(id).username.toLowerCase();
+// discord uses ! after the @ to designate nickname
+      tipuserid=tipuser.substring(3,tipuser.length-1);
+      tipuser=bot.users.cache.get(tipuserid).username.toLowerCase();
+
+console.log("user to tip nickname is ",tipuser);
+console.log("user id to tip is ",tipuserid);
+    }
+// smart phone
+     if((tipuser[0] =="<") && (tipuser[1] =="@"))
+    { // found user id
+// discord uses ! after the @ to designate nickname
+      tipuserid=tipuser.substring(2,tipuser.length-1);
+      tipuser=bot.users.cache.get(tipuserid).username.toLowerCase();
+
+console.log("user to tip nickname is ",tipuser);
+console.log("user id to tip is ",tipuserid);
     }
     //  checking for valid user
     var usersfound=0;
     const list=message.guild.members;
-    list.forEach(member =>
-    {
-      if(tipuser == member.user.username.toLowerCase())
-      {
-        usersfound++;
-        tipuser=member.user.username+member.user.discriminator;
-        text="";      
-      }
-    });
-    if(usersfound==0)
-    {
-      message.reply("**  user "+tipuser+" not found");
-      return;
-    }
-     if(usersfound >1)
-    {
-      message.reply("hummm, small problem - I found "+usersfound+" users by that name.");
-      return;
-    }
+//    list.forEach(member =>
+//    {
+//      if(tipuserid == member.user.id)
+//      {
+//        usersfound++;
+//        //tipuserid=member.user.id;
+//        text="";      
+//      }
+//    });
+//    if(usersfound==0)
+//    {
+//      message.reply("**  user "+tipuser+" not found");
+//      return;
+//    }
+//     if(usersfound >1)
+//    {
+//      message.reply("hummm, small problem - I found "+usersfound+" users by that name.");
+//      return;
+//    }
   }
   else
     bad=1;
@@ -1020,25 +1568,9 @@ async function sendTip(message,quiet)
     }
   }
 
-  if(args[3] && bad==0) ////////////////  coin
-  {//  check to see if we handle that coin
-    var found=0;
-    tipcoin=args[3].toUpperCase();
-    coinsarray.forEach(cn =>
-    {
-      if(cn==tipcoin)
-        found++;
-    });
-    if(!found)
-    {
-      bad=1;
-      errmsg=errmsg+"\n**  that coin is not used here.";
-    }
-  }
-
-  if(args[4] && bad==0)
+  if(args[3] && bad==0)
   {
-    arg4=args[4].toLowerCase();
+//    arg4=args[4].toLowerCase();
     text="**  what you talkin about Willis?";
     message.channel.send(text);
 
@@ -1053,8 +1585,7 @@ async function sendTip(message,quiet)
   if(bad)
   {
     text="tip @user amount\n\n";
-//    text=text+"  if ticker is not used, "+ticker+" will be used.\n";
-    const embed = new Discord.RichEmbed()
+    const embed = new Discord.MessageEmbed()
     .setTitle("Tip help")
     .setColor(0x97AE86)
     .setDescription(text)
@@ -1063,9 +1594,18 @@ async function sendTip(message,quiet)
     return;
   }
 
-  var tippersbalance=await getGameBalance(user+authorid,tipcoin);
+console.log("calling tipper getGameBalance userid ",userid, "ticker",ticker);
+  var tippersbalance=await getGameBalance(userid,ticker);
+console.log("tippersbalance=",tippersbalance);
+  var otherbalance=await getGameBalance(tipuserid,ticker,true);
 
-  var otherbalance=await getGameBalance(tipuser,tipcoin,true);
+  if(gamebalance<0)
+  {
+    text="Sorry, could not find any address for you in my database.";
+    text=text+"\nyou need to make an address by using the command \\*dep";
+    text=text+"\n(*help for help)";
+    message.reply(text);
+  }
 
   if(tippersbalance < amount)
   {
@@ -1076,12 +1616,18 @@ async function sendTip(message,quiet)
 
   if(otherbalance ==-1)
   {
-    text=tipuser+" does not have a "+tipcoin+" account.";
-    text=text+"\nPlease have "+tipuser+" create one by typing:";
+    text=tipuser+" does not have a "+ticker+" account.";
+    if(tipuser)
+    {
+      text=text+"\nPlease have "+tipuser+" create one by typing:";
+    }
+    else
+    {
+      text=text+"\nPlease have "+tipuser+" create one by typing:";
+    }
     text=text+"\n*dep\n";
     text=text+"(for a "+ticker+" address)\n\n";
-    text=text+"  if using a different crypto - (like "+tipcoin+")\nthey will have to go to that Discord to create an address for it's coin"; 
-    const embed = new Discord.RichEmbed()
+    const embed = new Discord.MessageEmbed()
     .setTitle("Tip help")
     .setColor(0x97AE86)
     .setDescription(text)
@@ -1090,9 +1636,9 @@ async function sendTip(message,quiet)
     return;
   }
 
-  var res=await subTip(user+authorid,(tippersbalance*1)-(amount*1),amount*1,tipcoin);
+  var res=await subTip(userid,(tippersbalance*1)-(amount*1),amount*1,ticker);
   var changed=res.affectedRows;
-  var res=await addTip(tipuser,(otherbalance*1)+(amount*1),amount*1,tipcoin);
+  var res=await addTip(tipuserid,(otherbalance*1)+(amount*1),amount*1,ticker);
   changed=(changed*1)+(res.affectedRows*1);
   if(changed==2)
   {
@@ -1111,11 +1657,16 @@ async function sendTip(message,quiet)
 }
 
 /////////////////////////////////////////////// addTip
-async function addTip(user,amount,tipamount,ticker)
+async function addTip(userid,amount,tipamount,ticker)
 {//  write new balance of tipper
-console.log("\nlooking to addtip for user ",user);
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
+console.log("\nlooking to addtip for userd ",userid);
 // get tips_sent balance
-  let res= await  pool.query("select * from addresses where name = \""+user+"\"");
+  let res= await  pool.query("select * from addresses where userid = \""+userid+"\"");
   let nmRows=res.length;
   var tbal=0;
   var bbal=0;
@@ -1147,10 +1698,15 @@ console.log("\nlooking to addtip for user ",user);
 }
 
 /////////////////////////////////////////////// subTip
-async function subTip(user,amount,tipamount,ticker)
+async function subTip(userid,amount,tipamount,ticker)
 {//  write new balance of tipper
 // get tips_sent balance
-  let res= await  pool.query("select * from addresses where name = \""+user+"\"");
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
+  let res= await  pool.query("select * from addresses where userid = \""+userid+"\"");
   let nmRows=res.length;
   var tbal=0;
   var bbal=0;
@@ -1182,15 +1738,20 @@ async function subTip(user,amount,tipamount,ticker)
 
 
 ////////////////////////////////////////////////////////////// chargeUser
-async function chargeUser(user)
+async function chargeUser(userid)
 {//  write new balance of tipper
 // get tips_sent balance
 // user=user+authorid;
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
 
   let bal=0;
   let spent=0;
   let address="";
-  let res= await  pool.query("select * from addresses where name = \""+user+"\"");
+  let res= await  pool.query("select * from addresses where userid = \""+userid+"\"");
 //console.log("chargeUser user=",user);
 //console.log("chargeUser res=",res);
   let nmRows=res.length;
@@ -1221,60 +1782,56 @@ async function chargeUser(user)
 }
 
 /////////////////////////////////////////////  getBalance
-async function getBalance(message,tick)
+async function getBalance(message)
 {
+console.log("getBalance called");
   let user=message.author.username;
-  let authorid=message.author.discriminator;
-  var thisuser=user+authorid;
-  pool.query("SELECT * FROM addresses where name=\""+thisuser+"\"", function (err, result, fields)
+  let userid=message.author.id;
+
+console.log("userid=",userid);
+console.log("user=",user);
+
+
+  pool.query("SELECT * FROM addresses where userid=\""+userid+"\"", function (err, result, fields)
   {
     if (err) throw err;
     var numRows = result.length;
-    var text=thisuser+", returned "+numRows+" records";
-    console.log(text);
+
+ var text=user+", returned "+numRows+" records";
+ console.log(text);
+
     if(numRows)
     {
       var found=0;
       for(let i=0;i<numRows;i++)
       {
-        console.log(result[i].balance);
-//        if(tick)
-//        {
-          if(ticker == result[i].ticker)
-          {
-            text="Your current balance:\n"+result[i].ticker+"  "+result[i].balance+"  Deposit address  "+result[i].address;
-            found=1;
-            message.reply(text);
-          }
-//        }
-//        else
-//        {
-//          text="Your current balance:\n"+result[i].ticker+"  "+result[i].balance+"  Deposit address  "+result[i].address;
-//          found++;
-//          message.reply(text);
-//        }
+console.log(result[i].balance);
+        if(ticker == result[i].ticker)
+        {
+          text="Your current balance:\n"+result[i].ticker+"  "+result[i].balance+"  Deposit address  "+result[i].address;
+          found=1;
+          message.reply(text);
+        }
       }
     }
     if(!found)
     {
-      text="Sorry, could not find any record of "+ticker+" in the \'games\' database for you.";
-        text=text+"\nyou need to make an address by using the command *dep";
+      text="Sorry, could not find any address for you in my database.";
+        text=text+"\nyou need to make an address by using the command \\*dep";
         text=text+"\n(*help for help)";
       message.reply(text);
     }
   });
 }
 
-async function getGameBalance(user)
+async function getGameBalance(userid)
 {
-//  var tempuser=user+authorid;
- // if(id) // true if id is included in user
-//    tempuser=user;
-//console.log("looking for user %s and ticker %s",user,ticker);
+console.log("looking for user %s and ticker %s",userid,ticker);
+
   try
   {
     let result = await pool.query(
-        "select * from addresses where name = \""+user+
+        "select * from addresses where userid = \""+userid+
         "\" AND ticker = \""+ticker+"\"");
 //console.log("getGameBalance result=",result);
     var numRows = result.length;
@@ -1301,11 +1858,16 @@ async function getGameBalance(user)
   }  
 }
 
-async function insertAddress(user,address,ticker)
+async function insertAddress(user,userid,address,ticker)
 {
+  user=user.replace(/\W/g, '');
+  user=user.replace(/\-/g,"_");
+  user=user.replace(/í/g,"i");
+  user=user.replace(/'/g,"");
+
   try
   {
-    let result = await pool.query("insert into addresses (name,ticker,address,balance,tips,wallet) VALUES (\""+ user+"\",\""+ticker+"\",\""+address+"\",\"0\",\"0\",\"0\")");
+    let result = await pool.query("insert into addresses (name,userid,ticker,address,balance,tips,wallet) VALUES (\""+ user+"\",\""+userid+"\",\""+ticker+"\",\""+address+"\",\"0\",\"0\",\"0\")");
 //console.log("insert result=",result);
     return(result);
   }
@@ -1318,6 +1880,11 @@ async function insertAddress(user,address,ticker)
 
 async function insertUser(user)
 {
+  user=user.replace(/\W/g, '');
+  user=user.replace(/\-/g,"_");
+  user=user.replace(/í/g,"i");
+  user=user.replace(/'/g,"");
+
 // first query to see if user is listed
   pool.query("SELECT * FROM users where name=\""+user+"\"", async function (err, result, fields)
   {
@@ -1348,12 +1915,17 @@ async function insertUser(user)
 async function deposit(message)
 {
   let user=message.author.username;
-  let authorid=message.author.discriminator;
+  let userid=message.author.id;
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
   let text="";
-  let bal=await getWalletBalance(message,user+authorid,ticker);
+  let bal=await getWalletBalance(message,userid,ticker);
 
   // check for exsisting account
-  let param=user+authorid;
+  let param=userid;
   let method="getaddressesbyaccount";
 
   text="";
@@ -1373,13 +1945,13 @@ console.log("answer from await Daemon.  address=%j",address);
       address=await Daemon(message,ticker,method,param);
 
 //  add user to database
-      var result=await insertUser(user+authorid);
+      var result=await insertUser(userid);
 
 //  add address to database
-      result=await insertAddress(user+authorid,address,ticker);
+      result=await insertAddress(user,userid,address,ticker);
 
 //  create user table
-      result=await createUserTable(user+authorid);
+      result=await createUserTable(userid);
 console.log("result from createUserTable=",result);
     }
 
@@ -1390,11 +1962,15 @@ console.log("result from createUserTable=",result);
 }
 
 /////////////////////////////////////////  createUserTable
-async function createUserTable(xuser)
+async function createUserTable(userid)
 {
 // first query to see if user is listed
 // replace space in user name with underscore
-  let user=xuser.replace(/\ /g,"_");
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
   pool.query("show tables", async function (err, result, fields)
   {
     if (err) throw err;
@@ -1403,7 +1979,7 @@ async function createUserTable(xuser)
     for(let t=0;t<numRows;t++)
     {
       let tab=result[t].Tables_in_BANK;
-      if(tab==user)
+      if(tab==userid)
         found++;
 ;
     }
@@ -1412,7 +1988,7 @@ async function createUserTable(xuser)
 // create table
       try
       {
-        let result = await pool.query( "create table "+user+" (ID INT AUTO_INCREMENT,game VARCHAR(24),ticker VARCHAR(5),cost DECIMAL(24,8) DEFAULT 0.00,loss DECIMAL(24,8) DEFAULT 0.00,win DECIMAL(24,8) DEFAULT 0.00,draw DECIMAL(24,8) DEFAULT 0.00,date timestamp default now(),PRIMARY KEY(ID),INDEX(game))");
+        let result = await pool.query( "create table `"+userid+"` (ID INT AUTO_INCREMENT,game VARCHAR(24),ticker VARCHAR(5),cost DECIMAL(24,8) DEFAULT 0.00,loss DECIMAL(24,8) DEFAULT 0.00,win DECIMAL(24,8) DEFAULT 0.00,draw DECIMAL(24,8) DEFAULT 0.00,date timestamp default now(),PRIMARY KEY(ID),INDEX(game))");
         return(result);
       }
       catch(err)
@@ -1429,7 +2005,8 @@ async function withdraw(message)
 {
   const args = message.content.trim().split(/ /);
   var user=message.author.username;
-  var authorid=message.author.discriminator;
+  var userid=message.author.id;
+
   var text;
   var amount;
   var address;
@@ -1443,7 +2020,7 @@ async function withdraw(message)
   {
     text="*withdraw amount address\n";
     text=text+"you can use witdraw/withdrawal/send to send amount to address\n";
-    const embed = new Discord.RichEmbed()
+    const embed = new Discord.MessageEmbed()
     .setTitle(ticker+" Withdraw help")
     .setColor(0x97AE86)
     .setDescription(text)
@@ -1461,12 +2038,18 @@ async function withdraw(message)
   if(args[2])
   {
     address=args[2];
-    let first=address.startsWith("X")
+    let first=address.startsWith(firstchar);
+    let second=address.startsWith(firstchar2);
+
     let len=address.length; //34
-    if((first) && (len==34))
+
+//console.log("first=",first," len=",len);
+
+    if((first || second) && (len==34))
     {
-      res=await send(message,user+authorid,amount,address);
-      console.log("returned from send",res);
+//      console.log("returned from send",res);
+      res=await send(message,userid,amount,address);
+//      console.log("returned from send",res);
     }
     else
     {
@@ -1479,10 +2062,10 @@ async function withdraw(message)
     message.reply(" I need an address to send to");
     return;
   }
-console.log("returned from send res=",res);
+//console.log("returned from send res=",res);
 
-  let ins=await insertTx(user+authorid,ticker,address,res,"send",amount,1);
-console.log("from insertTx ins=",ins);
+  let ins=await insertTx(userid,ticker,address,res,"send",amount,1);
+//console.log("from insertTx ins=",ins);
   
   text="\nsend "+amount+" to address "+address;
   text=text+"\n tx "+res;
@@ -1493,10 +2076,15 @@ console.log("from insertTx ins=",ins);
 }
 
 //////////////////////////////////////////////////////////  subWithdrawal
-async function subWithdrawal(user,ticker,amount,wamount)
+async function subWithdrawal(userid,ticker,amount,wamount)
 {//  write new balance of tipper
-console.log("\nlooking to subtract withdrawal from user ",user);
-  let res= await  pool.query("select * from addresses where name = \""+user+"\"");
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
+console.log("\nlooking to subtract withdrawal from user ",userid);
+  let res= await  pool.query("select * from addresses where userid = \""+userid+"\"");
   let nmRows=res.length;
   var address="";
 
@@ -1522,11 +2110,12 @@ console.log("\nlooking to subtract withdrawal from user ",user);
 
 }
 
-async function insertTx(user,coin,addr,txid,txtype,amt,done)
+
+async function insertTx(userid,coin,addr,txid,txtype,amt,done)
 {
   return new Promise((resolve,reject) =>
   {
-    pool.query("insert into transactions (name,ticker,address,txid,txtype,amount,done) VALUES (\""+user+"\",\""+coin+"\",\""+addr+"\",\""+txid+"\",\""+txtype+"\",\""+amt+"\",\""+done+"\")", function(err,txresults)
+    pool.query("insert into transactions (name,ticker,address,txid,txtype,amount,done) VALUES (\""+userid+"\",\""+coin+"\",\""+addr+"\",\""+txid+"\",\""+txtype+"\",\""+amt+"\",\""+done+"\")", function(err,txresults)
     {
       if (err) resolve(err);
       resolve(txresults);
@@ -1535,13 +2124,25 @@ async function insertTx(user,coin,addr,txid,txtype,amt,done)
 }
 
 ///////////////////////////////////////////////////////////////////////////////  send
-async function send(message,user,amount,address)
+async function send(message,userid,amount,address)
 {
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
   var text;
-  var balance=await getGameBalance(user);
+  var balance=await getGameBalance(userid);
+  if(balance<0)
+  {
+    text="Sorry, could not find any address for you in my database.";
+    text=text+"\nwhat are you trying to do?";
+    message.reply(text);
+  }
+
   var newbalance=balance-amount;
 
-  if(newbalance>0)
+  if(newbalance>=0)
     text=text+"     so far, so good ...\n";
   else
   {
@@ -1554,14 +2155,14 @@ async function send(message,user,amount,address)
 console.log("daemon response=",response);
 
 //  update users balance
-  await subWithdrawal(user,ticker,newbalance,amount);
+  await subWithdrawal(userid,ticker,newbalance,amount);
   return response;
 }
 
 
-async function getWalletBalance(message,theuser,ticker)
+async function getWalletBalance(message,userid,ticker)
 {//for exsisting address
-  let response= await Daemon(message,ticker,"getbalance",theuser);
+  let response= await Daemon(message,ticker,"getbalance",userid);
 //  let text=ticker+" balance ="+response;
 //  message.reply(text);
   return(response);
@@ -1609,7 +2210,7 @@ async function walletStatus(message)
   text=text+"\n(tips sent to Spiders Bingo)";
   text=text+"\nHouse bal.   "+house[0].balance+" "+ticker;
 
-  const embed = new Discord.RichEmbed()
+  const embed = new Discord.MessageEmbed()
   .setTitle(ticker+" Wallet Info")
   .setColor(0x97AE86)
   .setDescription(text)
@@ -1619,11 +2220,41 @@ async function walletStatus(message)
   return(response);
 }
 
+///////////////////////////////////////////////////////////////// peer list
+async function peerList(message)
+{
+  let res= await Daemon(message,ticker,"getpeerinfo","");
+//console.log("getpeerinfo",res);
+  let nmRows=res.length;
+
+  var temp="";
+  for(let t=0;t<nmRows;t++)
+  {
+    var w=res[t].addr;
+    w=w.substr(0, w.lastIndexOf(":"));
+    temp=temp+"addnode="+w+"\n";
+  }
+
+  let text="\nConnections: "+nmRows+"\n";
+  text=text+temp;
+
+  const embed = new Discord.MessageEmbed()
+  .setTitle(ticker+" Peer Info")
+  .setColor(0x97AE86)
+  .setDescription(text)
+  .setFooter("Spiders Bingo - 2018 ", "http://altcoinwarz.com/images/coins-medium/"+logo)
+  message.channel.send({embed});
+
+
+  return(res);
+}
+
+
 ////////////////////////////////////////////////////////////////////  donate
 async function donate(message)
 {
   let title="";
-  if(ticker=="LCP")
+  if(ticker=="SPB")
   {
     title="BTC Donation status";
     response= await Daemon(message,"BTC","getinfo","");
@@ -1631,8 +2262,10 @@ async function donate(message)
     let text=   "Version:     "+response.version;
     text=text+"\nBlocks:      "+response.blocks;
     text=text+"\nConnections: "+response.connections;
-    text=text+"\nBalance:     "+response.balance+" BTC";
+    response= await Daemon(message,"BTC","getbalance",ticker);
+    text=text+"\nBalance:     "+response+" BTC";
     text=text+"\n\nDonation BTC address: \n13YuyPtXs96g8gR45Gfn1PBAWuxGVGMdhk";
+//    text=text+"\n\nDonation BTC address: \n143E8DApvL4QmkTwrTxbK1GV55DP6MCyna";
 
     let user="Spiders Bingo8267";
     let res=await pool.query("select * from addresses where name = \""+user+"\"");
@@ -1656,7 +2289,7 @@ async function donate(message)
     text=text+"\nDonation bal "+bbal+" "+ticker;
     text=text+"\n(plus tips sent to Spiders Bingo)";
 
-    const embed = new Discord.RichEmbed()
+    const embed = new Discord.MessageEmbed()
     .setTitle(title)
     .setColor(0x97AE86)
     .setDescription(text)
@@ -1668,33 +2301,46 @@ async function donate(message)
 }
 
 ///////////////////////////////////////////////////////////////////  creditUser
-async function creditUser(game,cost,txtype,ticker,user,amt)
+async function creditUser(game,cost,txtype,ticker,userid,amt)
 {
-  let cuser=user
-  let res=await loadPlayers(ticker);
-  for(let t=0;t<res.length;t++)
-  {
-    if(res[t].name==cuser)
-    {
-      cuser=cuser+res[t].authorid;
-      break;
-    }
-  }
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
+//  let cuser=user
+
+
+//  let res=await loadPlayers(ticker);
+//  for(let t=0;t<res.length;t++)
+//  {
+//    if(res[t].name==userid)
+//    {
+//      cuser=cuser+res[t].authorid;
+//      break;
+//    }
+//  }
+
 // we are adding the game to the history
-  res=await setUser(game,cost,txtype,ticker,cuser,amt);
+  res=await setUser(game,cost,txtype,ticker,userid,amt);
 //  update his address amount (winnings)
-  res=await getUserAddress(cuser,ticker,amt);
+  res=await getUserAddress(userid,ticker,amt);
 //console.log(cuser+" amt="+amt);
 //console.log(cuser+" res="+res);
-  res=await setUserAddress(cuser,ticker,res);
+  res=await setUserAddress(userid,ticker,res);
 }
 
 ///////////////////////////////////////////////////////////////////  getUserAddress
-async function getUserAddress(user,ticker,amt)
+async function getUserAddress(userid,ticker,amt)
 {
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
   try
   {
-    let result = await pool.query("select * from addresses where name=\""+user+"\" and  ticker="+"\""+ticker+"\"");
+    let result = await pool.query("select * from addresses where userid=\""+userid+"\" and  ticker="+"\""+ticker+"\"");
     let bal=result[0].balance;
     bal=bal+amt;
 //console.log(user+" getUserAddress-> bal="+bal);
@@ -1706,11 +2352,16 @@ async function getUserAddress(user,ticker,amt)
   }
 }
 //////////////////////////////////////////////////////////////////  setUserAddress
-async function setUserAddress(user,ticker,amt)
+async function setUserAddress(userid,ticker,amt)
 {
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
   try
   {
-    let result = await pool.query("update addresses set balance=\""+amt+"\" where name=\""+user+"\" and ticker="+"\""+ticker+"\"");
+    let result = await pool.query("update addresses set balance=\""+amt+"\" where userid=\""+userid+"\" and ticker="+"\""+ticker+"\"");
     return(result);
   }
   catch(err)
@@ -1720,33 +2371,27 @@ async function setUserAddress(user,ticker,amt)
 }
 
 //////////////////////////////////////////////////////////////////  readUser       ******
-async function readUser(message,user)
+async function readUser(message)
 {
-//  let res=await loadPlayers(ticker);
-//  for(let t=0;t<res.length;t++)
-//  {
-//    if(res[t].name==user)
-//    {
-//      user=user+res[t].authorid;
-//      break;
-//    }
-//  }
+  user=message.author.username;
+  userid=message.author.id;
 
-// replace space with underscore
-  let cuser=user.replace(/\ /g,"_");
   let cost=0;
   let loss=0;
   let win=0;
   let draw=0;
   try
   {
-    let result = await pool.query("select * from  "+cuser+" where ticker=\""+ticker+"\"");
+    let result = await pool.query("select * from  `"+userid+"` where ticker=\""+ticker+"\"");
     for(let t=0;t<result.length;t++)
     {
-      cost=cost+result[t].cost;
-      loss=loss+result[t].loss;
-      win=win+result[t].win;
-      draw=draw+result[t].draw;
+      if(result[t].game=="bingo")
+      {      
+        cost=cost+result[t].cost;
+        loss=loss+result[t].loss;
+        win=win+result[t].win;
+        draw=draw+result[t].draw;
+      }
     }
 
     title=user+"'s stats for "+ticker;
@@ -1757,7 +2402,7 @@ async function readUser(message,user)
     text=text+"\nties  "+draw;
 let total=win+draw-cost;
 text=text+"\n\nbingo total: "+total;
-  const embed = new Discord.RichEmbed()
+  const embed = new Discord.MessageEmbed()
   .setTitle(title)
   .setColor(0x97AE86)
   .setDescription(text)
@@ -1771,10 +2416,14 @@ text=text+"\n\nbingo total: "+total;
 }
 
 ///////////////////////////////////////////////////////////////////  setUser
-async function setUser(game,cost,txtype,ticker,xuser,amt)
+async function setUser(game,cost,txtype,ticker,userid,amt)
 {
-// replace space with underscore
-  let user=xuser.replace(/\ /g,"_");
+//user=xuser;
+//  user=user.replace(/\W/g, '');
+//  user=user.replace(/\-/g,"_");
+//  user=user.replace(/í/g,"i");
+//  user=user.replace(/'/g,"");
+
   let win=0;
   let loss=0;
   let draw=0;
@@ -1787,7 +2436,7 @@ async function setUser(game,cost,txtype,ticker,xuser,amt)
 
   try
   {
-    let result = await pool.query("insert into "+user+" (game,ticker,cost,loss,win,draw) value (\""+game+"\",\""+ticker+"\",\""+cost+"\",\""+loss+"\",\""+win+"\",\""+draw+"\")");
+    let result = await pool.query("insert into `"+userid+"` (game,ticker,cost,loss,win,draw) value (\""+game+"\",\""+ticker+"\",\""+cost+"\",\""+loss+"\",\""+win+"\",\""+draw+"\")");
     return(result);
   }
   catch(err)
@@ -1860,6 +2509,8 @@ console.log(" Daemon param2= "+param2);
 
   if(param2)
   {
+  param=param.replace(/í/g,"i");
+//  param2=param2.replace(/í/g,"i");
     return new Promise((resolve, reject) =>
     {
       var resp=client.call(
@@ -1888,6 +2539,7 @@ console.log("daemon res =",res);
 
   if(param)
   {
+  param=param.replace(/í/g,"i");
     return new Promise((resolve, reject) =>
     {
       var resp=client.call(
@@ -1936,4 +2588,426 @@ console.log("daemon res =",res);
   }
 }
 
+//==================================================================================================  get prices
+async function getPrices(message)
+{
+  var text="";
+  var datadate="";
+  bodymsg="";
+  try
+  {
+    let res = await pricepool.query("select * from "+ticker);
+    let nmRows=res.length;
+
+    for(let t=0;t<nmRows;t++)
+    {
+      var exchange=res[t].exchange;
+      var pair=res[t].pair;
+      var bid=res[t].bid;
+      var ask=res[t].ask;
+      var close=res[t].close;
+      datadate=res[t].date;
+
+      bodymsg=exchange;
+      bodymsg+=" - "+pair+"\nbid "+bid.toFixed(8);
+      bodymsg+=" - ask "+ask.toFixed(8);
+      bodymsg+=" - close "+close.toFixed(8)+"\n\n";
+      text=text+bodymsg;
+    }
+
+  }
+  catch(err)
+  {
+    console.log('getPrices Error occurred', err);
+  }
+
+  var sendmess=0;
+  var title="";
+
+  if(sendmess==0)
+  {
+    title="Price Check - "+server;
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo);
+    message.reply({embed});
+  }
+}
+
+//==================================================================================================  send Drip
+async function sendDrip(message)
+{
+  if(!fountain_enabled)
+  {
+    FountainDisabled(message);
+    return;
+  }
+
+//    message.channel.send("fountain enabled but not finished.");
+
+  dripamount=.1;
+  sendmess=1;
+  user=message.author.username;
+  userid=message.author.id;
+  title=server+" Fountain";
+
+
+  // check to see if user has address
+console.log("looking for address for user ",userid);
+  var otherbalance=await getGameBalance(userid,ticker,true);
+console.log("balance is ",otherbalance);
+
+  // check age of account
+console.log("looking for age of account ",userid);
+  var userage=await getUserAge(userid);
+  var tDuration = getDuration(userage);
+
+  if(userage<cutage)
+  {
+    console.log("age is ",userage);
+    mess=user+" discord account is "+tDuration.value+" "+tDuration.unit+" old."; 
+    message.channel.send(mess);
+  }
+  else
+  {
+    console.log("user is not in the database");
+    userage=cutage+1;
+  }    
+
+  if(userage <cutage)
+  {
+    //  this is where we stop them
+    mess=user+" discord account is too new to use the faucet."; 
+    message.channel.send(mess);
+    return;
+  }
+
+  if(otherbalance ==-1)
+  {
+    text=userid+", you not have a "+ticker+" account.";
+//    if(tipuser)
+//    {
+//      text=text+"\nPlease have "+tipuser+" create one by typing:";
+//    }
+//    else
+//    {
+//      text=text+"\nPlease have "+tipuser+" create one by typing:";
+//    }
+
+    text=text+"\n*dep\n";
+    text=text+"(for a "+ticker+" address)\n\n";
+    const embed = new Discord.MessageEmbed()
+    .setTitle("Tip help")
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spidersbox - 2018", "http://altcoinwarz.com/images/coins-medium/"+logo)
+    message.reply({embed});
+    return;
+  }
+
+
+
+  let lastdate="";
+  try
+  {
+    let result = await pool.query("select * from  `"+userid+"` where ticker=\""+ticker+"\"  and game='faucet'");
+    for(let t=0;t<result.length;t++)
+    {
+      lastdate=result[t].date;
+    }
+  }
+  catch(err)
+  {
+    console.log('sendDrip Error occurred', err);
+  }
+
+  lasttime=new Date(lastdate).getTime();
+  curtime=new Date().getTime();
+  diff=(curtime-lasttime)/60000; // now is minutes
+  mindiff=parseInt(diff, 10); // total minutes from last request
+
+  if(mindiff<60) // wait 1 hour (60 minutes)
+  {
+    mydate = new Date(curtime-lasttime);
+    hours = mydate.getUTCHours();
+    minutes = mydate.getUTCMinutes();
+    seconds = mydate.getSeconds();
+
+    text=user+"'s last drip "+hours+ " hour";
+    if(hours>1)
+      text+="s";
+    text+=", "+minutes+" minute";
+    if(minutes>1)
+      text+="s";
+    text+=" ago\nPlease wait one hour between requests";
+  }
+  else
+  {
+    text="looking in the bucket...\n";
+    var fountainbal=0;
+    var test=await getGameBalance(fountainid);
+    fountainbal=test;
+console.log("sendDrip: test=%d gamebalance=%d",fountainbal,gamebalance);
+    text+="found "+fountainbal+" "+ticker+"\n";
+
+    if(fountainbal > dripamount)
+    {
+      var userid=message.author.id;
+      text+="still some left - have some :slight_smile:\n";
+
+      ret=await addDrip(userid,dripamount,ticker);
+//console.log("ret from addDrip",ret);
+      ret=await subDrip(fountainid,dripamount,ticker);
+
+
+    await setUser("faucet",dripamount,"win",ticker,userid,dripamount);
+    await setUser("faucet",dripamount,"lose",ticker,fountainid,dripamount);
+    text+="\n\n\`\`\`you received "+dripamount+" "+ticker;
+
+    var newbal=await getGameBalance(userid,ticker,true);
+
+    text=text+"\n your balance "+newbal+" \`\`\`\n";
+
+//console.log("getGameBal: test=%d gamebalance=%d",test,gamebalance);
+
+    }
+    else
+    {
+text+="sorry, the well has run dry.\nplease wait until someone adds more "+ticker;
+    }
+  }
+
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spiders Bingo - 2018 ", "http://altcoinwarz.com/images/coins-medium/"+ticker+".png")
+    message.channel.send({embed});
+  }
+
+
+
+
+}
+
+//*****************************************************************  get duration
+function getDuration(milli)
+{
+  let minutes = Math.floor(milli);
+  let hours = Math.round(minutes / 60);
+  let days = Math.round(hours / 24);
+
+  return (
+    (days && {value: days, unit: 'days'}) ||
+    (hours && {value: hours, unit: 'hours'}) ||
+    {value: minutes, unit: 'minutes'}
+  )
+};
+///////////////////////////////////////////////  getUserAge
+async function getUserAge(userid)
+{//  get the date/time the users discord accoutn was created
+  var lastdate;
+  try
+  {
+    let result = await watchdog.query("select * from users where userid=\""+userid+"\"");
+    for(let t=0;t<result.length;t++)
+    {
+      lastdate=result[t].born;
+    }
+  }
+  catch(err)
+  {
+    console.log('getuserage Error occurred', err);
+  }
+
+  const age=(Date.now() - lastdate)/60000; // now in minutes
+
+  return (age);
+}
+
+/////////////////////////////////////////////// addDrip
+async function addDrip(userid,amount,ticker)
+{//  write new balance of tipper
+
+console.log("\nlooking to addtip for userd ",userid);
+
+// add tips_sent balance
+  let res= await  pool.query("select * from addresses where userid = \""+userid+"\"");
+  let nmRows=res.length;
+  var tbal=0;
+  var bbal=0;
+  var address="";
+
+  for(let t=0;t<nmRows;t++)
+  {
+    if(ticker == res[t].ticker)
+    {
+      tbal=res[t].tips*1;
+      bbal=(res[t].balance)*1;
+      address=res[t].address;
+      break;
+    }
+  }
+
+  tbal=tbal+amount*1;
+  bbal=bbal+amount*1;
+  try
+  {
+    let ad=await pool.query("update addresses set tips=\""+tbal+
+        "\", balance=\""+bbal+"\" where address = \""+address+"\"");
+    return(ad);
+  }
+  catch(err)
+  {
+    console.log('addDrip Error occurred', err);
+  }
+}
+/////////////////////////////////////////////// subDrip
+async function subDrip(userid,amount,ticker)
+{//  write new balance of tipper
+
+  let res= await  pool.query("select * from addresses where userid = \""+userid+"\"");
+  let nmRows=res.length;
+  var tbal=0;
+  var bbal=0;
+  var address="";
+
+  for(let t=0;t<nmRows;t++)
+  {
+    if(ticker == res[t].ticker)
+    {
+      tbal=res[t].tips_sent;
+      bbal=res[t].balance;
+      address=res[t].address;
+      break;
+    }
+  }
+
+  tbal=tbal-amount;
+  bbal=bbal-amount;
+  try
+  {
+    let ad=await pool.query("update addresses set tips_sent=\""+tbal+
+        "\", balance=\""+bbal+"\" where address = \""+address+"\"");
+    return(ad);
+  }
+  catch(err)
+  {
+    console.log('subDrip Error occurred', err);
+  }
+}
+
+//==================================================================================================  FountainDisabled
+async function FountainDisabled(message)
+{
+//  text="\`\`\`cpp\n"+line0+"\n"+line1+"\n"+line2+"\n"+line3+"\n"+line4+"\n"+line5+"   \n\`\`\`";
+
+  var text="\`\`\`cpp\nfunction is disabled.";
+  text+="\n\nfaucet is disabled.\nbots will be shut down soon.\nplease transfer your coins away from discord wallet.";
+
+
+
+  var sendmess=0;
+  var title="";
+
+text+="  \n\`\`\`";
+  if(sendmess==0)
+  {
+    title=server+" Fountain";
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spiders Bingo - 2018 ", "http://altcoinwarz.com/images/coins-medium/"+ticker+".png")
+    message.channel.send({embed});
+  }
+}
+
+//==================================================================================================  Rain
+async function Rain(message)
+{
+  if(!rain_enabled)
+  {
+    RainDisabled(message);
+    return;
+  }
+
+
+    message.channel.send("rain enabled but not finished.");
+
+}
+//==================================================================================================  RainDisabled
+async function RainDisabled(message)
+{
+
+  var text="\`\`\`cpp\nno.  I don't feel like it right now.";
+  text+="\nunder construction";
+
+
+
+  var sendmess=0;
+  var title="";
+
+text+="  \n\`\`\`";
+  if(sendmess==0)
+  {
+    title=server+" Rain Clouds";
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spiders Bingo - 2018 ", "http://altcoinwarz.com/images/coins-medium/"+ticker+".png")
+    message.channel.send({embed});
+  }
+}
+
+//==================================================================================================  BingoDisabled
+async function BingoDisabled(message)
+{
+//  text="\`\`\`cpp\n"+line0+"\n"+line1+"\n"+line2+"\n"+line3+"\n"+line4+"\n"+line5+"   \n\`\`\`";
+
+  var text="\`\`\`cpp\nfunction is disabled.";
+text+="\n\nBingo is disabled.\nbots will be shut down soon.\nplease transfer your coins away from discord wallet.";
+
+
+  var sendmess=0;
+  var title="";
+
+text+="  \n\`\`\`";
+  if(sendmess==0)
+  {
+    title=server+" Bingo";
+    sendmess=1;
+  }
+
+  if(sendmess==1)
+  {
+    const embed = new Discord.MessageEmbed()
+    .setTitle(title)
+    .setColor(0x97AE86)
+    .setDescription(text)
+    .setFooter("Spiders Bingo - 2018 ", "http://altcoinwarz.com/images/coins-medium/"+ticker+".png")
+    message.channel.send({embed});
+  }
+}
 
